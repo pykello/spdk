@@ -419,6 +419,28 @@ if __name__ == "__main__":
     p.add_argument('name', help='malloc bdev name')
     p.set_defaults(func=bdev_malloc_delete)
 
+    def bdev_ubi_create(args):
+        print_json(rpc.bdev.bdev_ubi_create(args.client,
+                                            name=args.name,
+                                            base_bdev=args.base_bdev,
+                                            image_path=args.image_path,
+                                            stripe_size_mb=args.stripe_size_mb))
+
+    p = subparsers.add_parser('bdev_ubi_create', help='Creates a ubi bdev')
+    p.add_argument('-n', '--name', help='ubi bdev name', required=True)
+    p.add_argument('-i', '--image-path', help='image path', required=True)
+    p.add_argument('-z', '--stripe-size-mb', help='stripe size in MB', type=int, required=False)
+    p.add_argument('-b', '--base-bdev', help='base bdev name', required=True)
+    p.set_defaults(func=bdev_ubi_create)
+
+    def bdev_ubi_delete(args):
+        rpc.bdev.bdev_ubi_delete(args.client,
+                                 name=args.name)
+
+    p = subparsers.add_parser('bdev_ubi_delete', help='Deletes a ubi bdev')
+    p.add_argument('name', help='ubi bdev name')
+    p.set_defaults(func=bdev_ubi_delete)
+
     def bdev_null_create(args):
         num_blocks = (args.total_size * 1024 * 1024) // args.block_size
         if args.dif_type and not args.md_size:

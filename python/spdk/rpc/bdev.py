@@ -326,6 +326,32 @@ def bdev_malloc_delete(client, name):
     return client.call('bdev_malloc_delete', params)
 
 
+def bdev_ubi_create(client, name, base_bdev, image_path, stripe_size_mb):
+    """Construct a ubi block device.
+    Args:
+        name: name of the ubi bdev to create
+        base_bdev: block device to store and read modified data
+        image_path: base image path
+        stripe_size_mb: unit size for fetching data from the base image
+    """
+    params = {
+        'name': name,
+        'image_path': image_path,
+        'base_bdev': base_bdev,
+        'stripe_size_mb': stripe_size_mb
+    }
+    return client.call('bdev_ubi_create', params)
+
+
+def bdev_ubi_delete(client, name):
+    """Delete ubi block device.
+    Args:
+        name: name of the ubi bdev to delete
+    """
+    params = {'name': name}
+    return client.call('bdev_ubi_delete', params)
+
+
 def bdev_null_create(client, num_blocks, block_size, name, physical_block_size=None, uuid=None, md_size=None,
                      dif_type=None, dif_is_head_of_md=None):
     """Construct a null block device.
