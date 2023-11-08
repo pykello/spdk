@@ -11,7 +11,9 @@ jobs:
       TARBALL_PATH: /home/runner/install/ubicloud-spdk-ubuntu-22.04-x64.tar.gz
     steps:
       - name: Print information
-        run: echo ${{ github.event_name }}
+        run: |
+          echo ${{ github.event_name }}
+          echo $${{ github.event.ref_type }}
       - name: Checkout repository and submodules
         uses: actions/checkout@v2
         with:
