@@ -13,7 +13,7 @@ jobs:
       - name: Print information
         run: |
           echo ${{ github.event_name }}
-          echo $${{ github.event.ref_type }}
+          echo ${{ github.event.ref_type }}
       - name: Checkout repository and submodules
         uses: actions/checkout@v2
         with:
