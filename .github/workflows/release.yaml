@@ -7,8 +7,8 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       INSTALL_PREFIX: ${{ github.workspace }}/install/spdk
-      TARBALL_NAME: ubicloud-spdk-ubuntu-22.04-${{ runner.arch }}.tar.gz
-      TARBALL_PATH: ${{ github.workspace }}/ubicloud-spdk-ubuntu-22.04-${{ runner.arch }}.tar.gz
+      TARBALL_NAME: ubicloud-spdk-ubuntu-22.04-x64.tar.gz
+      TARBALL_PATH: ${{ github.workspace }}/${{ env.TARBALL_NAME }}
     permissions:
       contents: write
     steps:
