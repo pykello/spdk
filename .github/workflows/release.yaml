@@ -19,7 +19,7 @@ jobs:
       - uses: ncipollo/release-action@v1
         if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
         with:
-          artifacts: "$TARBALL_PATH"
+          artifacts: "${{ env.TARBALL_PATH }}"
           allowUpdates: true
       # - name: Checkout repository and submodules
       #   uses: actions/checkout@v2
