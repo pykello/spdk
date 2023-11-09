@@ -36,4 +36,5 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
         with:
           artifacts: "${{ env.TARBALL_PATH }}"
+          body: "Release ${{ github.ref_name }}"
           allowUpdates: true
