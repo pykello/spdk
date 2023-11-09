@@ -15,29 +15,29 @@ jobs:
       - name: Print Information
         run: |
           echo $INSTALL_PREFIX
-      - name: Checkout repository and submodules
-        uses: actions/checkout@v2
-        with:
-          fetch-depth: 0
-          submodules: 'recursive'
-      - name: Install dependencies
-        run: sudo apt-get update && sudo scripts/pkgdep.sh --all
-      - name: Configure
-        run: ./configure --with-crypto --with-vhost --with-uring --target-arch=corei7 --prefix=$INSTALL_PREFIX --pydir=$INSTALL_PREFIX/python/lib --disable-unit-tests --disable-tests --disable-examples
-      - name: Build
-        run: make -j16
-      - name: Install
-        run: |
-          make install
-          cp -R python $INSTALL_PREFIX/python
-          mkdir $INSTALL_PREFIX/scripts
-          cp scripts/rpc.py $INSTALL_PREFIX/scripts
-      - name: Package
-        run: |
-          cd $INSTALL_PREFIX
-          tar --create --gzip --file=$TARBALL_PATH *
-      - uses: ncipollo/release-action@v1
-        if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
-        with:
-          artifacts: "${{ env.TARBALL_PATH }}"
-          allowUpdates: true
+      # - name: Checkout repository and submodules
+      #   uses: actions/checkout@v2
+      #   with:
+      #     fetch-depth: 0
+      #     submodules: 'recursive'
+      # - name: Install dependencies
+      #   run: sudo apt-get update && sudo scripts/pkgdep.sh --all
+      # - name: Configure
+      #   run: ./configure --with-crypto --with-vhost --with-uring --target-arch=corei7 --prefix=$INSTALL_PREFIX --pydir=$INSTALL_PREFIX/python/lib --disable-unit-tests --disable-tests --disable-examples
+      # - name: Build
+      #   run: make -j16
+      # - name: Install
+      #   run: |
+      #     make install
+      #     cp -R python $INSTALL_PREFIX/python
+      #     mkdir $INSTALL_PREFIX/scripts
+      #     cp scripts/rpc.py $INSTALL_PREFIX/scripts
+      # - name: Package
+      #   run: |
+      #     cd $INSTALL_PREFIX
+      #     tar --create --gzip --file=$TARBALL_PATH *
+      # - uses: ncipollo/release-action@v1
+      #   if: github.event_name == 'workflow_dispatch' && github.ref_type == 'tag'
+      #   with:
+      #     artifacts: "${{ env.TARBALL_PATH }}"
+      #     allowUpdates: true
