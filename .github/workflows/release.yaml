@@ -8,13 +8,14 @@ jobs:
     env:
       INSTALL_PREFIX: ${{ github.workspace }}/install/spdk
       TARBALL_NAME: ubicloud-spdk-ubuntu-22.04-x64.tar.gz
-      TARBALL_PATH: /home/runner/install/ubicloud-spdk-ubuntu-22.04-x64.tar.gz
+      TARBALL_PATH: ${{ github.workspace }}/ubicloud-spdk-ubuntu-22.04-x64.tar.gz
     permissions:
       contents: write
     steps:
       - name: Print Information
         run: |
           echo $INSTALL_PREFIX
+          echo $TARBALL_PATH
       # - name: Checkout repository and submodules
       #   uses: actions/checkout@v2
       #   with:
