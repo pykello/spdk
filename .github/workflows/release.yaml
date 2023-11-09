@@ -9,7 +9,9 @@ jobs:
       INSTALL_PREFIX: /home/runner/install/spdk
       TARBALL_NAME: ubicloud-spdk-ubuntu-22.04-x64.tar.gz
       TARBALL_PATH: /home/runner/install/ubicloud-spdk-ubuntu-22.04-x64.tar.gz
-    permissions: write-all
+    permissions:
+      contents: write
+      metadata: write
     steps:
       - name: Print information
         run: |
