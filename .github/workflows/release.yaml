@@ -1,9 +1,6 @@
 name: Ubicloud SPDK release
 on: [workflow_dispatch, push]
 
-permissions:
-  contents: write
-
 jobs:
   build:
     name: Build
@@ -12,6 +9,8 @@ jobs:
       INSTALL_PREFIX: /home/runner/install/spdk
       TARBALL_NAME: ubicloud-spdk-ubuntu-22.04-x64.tar.gz
       TARBALL_PATH: /home/runner/install/ubicloud-spdk-ubuntu-22.04-x64.tar.gz
+    permissions:
+      contents: write
     steps:
       - name: Print information
         run: |
