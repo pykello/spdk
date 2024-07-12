@@ -21,6 +21,9 @@ struct blob_bdev {
 	bool			write;
 	int32_t			refs;
 	struct spdk_spinlock	lock;
+	spdk_bdev_event_cb_t event_cb;
+	void *event_ctx;
+	const char *bdev_name;
 };
 
 struct blob_resubmit {
@@ -472,6 +475,35 @@ bdev_blob_translate_lba(struct spdk_bs_dev *dev, uint64_t lba, uint64_t *base_lb
 	return true;
 }
 
+static void blob_bdev_init(struct blob_bdev *b, struct spdk_bdev_desc *desc);
+
+static struct spdk_bs_dev *
+bdev_blob_clone(struct spdk_bs_dev *dev)
+{
+	struct blob_bdev *blob_bdev = (struct blob_bdev *)dev;
+	struct spdk_bs_dev *new_dev;
+	struct spdk_bdev_desc *desc;
+	int rc;
+
+	rc = spdk_bdev_open_ext(blob_bdev->bdev_name, blob_bdev->write, blob_bdev->event_cb,
+				blob_bdev->event_ctx, &desc);
+	if (rc != 0) {
+		SPDK_ERRLOG("could not open bdev\n");
+		return NULL;
+	}
+
+	new_dev = calloc(1, sizeof(*new_dev));
+	if (new_dev == NULL) {
+		SPDK_ERRLOG("could not allocate bs_dev\n");
+		spdk_bdev_close(desc);
+		return NULL;
+	}
+
+	blob_bdev_init((struct blob_bdev *)new_dev, desc);
+
+	return new_dev;
+}
+
 static void
 blob_bdev_init(struct blob_bdev *b, struct spdk_bdev_desc *desc)
 {
@@ -502,6 +534,7 @@ blob_bdev_init(struct blob_bdev *b, struct spdk_bdev_desc *desc)
 	b->bs_dev.is_zeroes = bdev_blob_is_zeroes;
 	b->bs_dev.is_range_valid = bdev_blob_is_range_valid;
 	b->bs_dev.translate_lba = bdev_blob_translate_lba;
+	b->bs_dev.clone = bdev_blob_clone;
 }
 
 void
@@ -549,6 +582,9 @@ spdk_bdev_create_bs_dev(const char *bdev_name, bool write,
 	b->write = write;
 	b->refs = 1;
 	spdk_spin_init(&b->lock);
+	b->event_cb = event_cb;
+	b->event_ctx = event_ctx;
+	b->bdev_name = bdev_name;
 
 	return 0;
 }
