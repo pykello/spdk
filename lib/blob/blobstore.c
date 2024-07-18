@@ -342,6 +342,83 @@ xattrs_free(struct spdk_xattr_tailq *xattrs)
 	}
 }
 
+static struct spdk_esnap_ref *
+bs_find_esnap_ref(struct spdk_blob_store *bs, struct spdk_bs_dev *bs_dev)
+{
+	struct spdk_esnap_ref *ref;
+
+	LIST_FOREACH(ref, &bs->esnap_refs, link) {
+		if (ref->bs_dev == bs_dev) {
+			return ref;
+		}
+	}
+
+	return NULL;
+}
+
+static int
+blob_add_esnap_ref(struct spdk_blob *blob)
+{
+	struct spdk_esnap_ref *ref;
+	struct spdk_blob_store *bs = blob->bs;
+
+	ref = bs_find_esnap_ref(bs, blob->back_bs_dev);
+	if (ref == NULL) {
+		ref = calloc(1, sizeof(*ref));
+		if (ref == NULL) {
+			return -ENOMEM;
+		}
+
+		ref->bs_dev = blob->back_bs_dev;
+		LIST_INSERT_HEAD(&bs->esnap_refs, ref, link);
+	}
+
+	LIST_INSERT_HEAD(&ref->clones, blob, esnap_ref_link);
+
+	return 0;
+}
+
+static void
+blob_move_esnap_ref(struct spdk_blob *old_blob, struct spdk_blob *new_blob)
+{
+	LIST_INSERT_AFTER(old_blob, new_blob, esnap_ref_link);
+	LIST_REMOVE(old_blob, esnap_ref_link);
+}
+
+static bool
+blob_remove_esnap_ref(struct spdk_blob *blob)
+{
+	struct spdk_esnap_ref *esnap_ref;
+
+	assert(blob->parent_id == SPDK_BLOBID_EXTERNAL_SNAPSHOT);
+
+	// Remove the blob from the list of clones
+	LIST_REMOVE(blob, esnap_ref_link);
+
+	esnap_ref = bs_find_esnap_ref(blob->bs, blob->back_bs_dev);
+	if (esnap_ref && LIST_EMPTY(&esnap_ref->clones)) {
+		LIST_REMOVE(esnap_ref, link);
+		free(esnap_ref);
+		return true;
+	}
+
+	return false;
+}
+
+static void
+blob_back_bs_dev_unref(struct spdk_blob *blob)
+{
+	if (blob->parent_id == SPDK_BLOBID_EXTERNAL_SNAPSHOT) {
+		if (blob_remove_esnap_ref(blob)) {
+			blob->back_bs_dev->destroy(blob->back_bs_dev);
+		}
+	} else {
+		blob->back_bs_dev->destroy(blob->back_bs_dev);
+	}
+
+	blob->back_bs_dev = NULL;
+}
+
 static void
 blob_free(struct spdk_blob *blob)
 {
@@ -360,7 +437,7 @@ blob_free(struct spdk_blob *blob)
 	xattrs_free(&blob->xattrs_internal);
 
 	if (blob->back_bs_dev) {
-		blob->back_bs_dev->destroy(blob->back_bs_dev);
+		blob_back_bs_dev_unref(blob);
 	}
 
 	free(blob);
@@ -402,11 +479,24 @@ blob_back_bs_destroy_esnap_done(void *ctx, struct spdk_blob *blob, int bserrno)
 static void
 blob_back_bs_destroy(struct spdk_blob *blob)
 {
+	bool last_ref;
+
 	SPDK_DEBUGLOG(blob_esnap, "blob 0x%" PRIx64 ": preparing to destroy back_bs_dev\n",
 		      blob->id);
 
-	blob_esnap_destroy_bs_dev_channels(blob, false, blob_back_bs_destroy_esnap_done,
-					   blob->back_bs_dev);
+	if (blob->parent_id == SPDK_BLOBID_EXTERNAL_SNAPSHOT) {
+		last_ref = blob_remove_esnap_ref(blob);
+	} else {
+		last_ref = true;
+	}
+
+	if (last_ref) {
+		blob_esnap_destroy_bs_dev_channels(blob, false, blob_back_bs_destroy_esnap_done,
+						   blob->back_bs_dev);
+	} else {
+		blob_esnap_destroy_bs_dev_channels(blob, false, NULL, NULL);
+	}
+
 	blob->back_bs_dev = NULL;
 }
 
@@ -1521,6 +1611,11 @@ blob_load_esnap(struct spdk_blob *blob, void *blob_ctx)
 
 	blob->back_bs_dev = bs_dev;
 	blob->parent_id = SPDK_BLOBID_EXTERNAL_SNAPSHOT;
+	rc = blob_add_esnap_ref(blob);
+	if (rc != 0) {
+		SPDK_ERRLOG("Failed to add esnap ref\n");
+		return rc;
+	}
 
 	return 0;
 }
@@ -6661,6 +6756,7 @@ bs_snapshot_freeze_cpl(void *cb_arg, int rc)
 	newblob->parent_id = origblob->parent_id;
 	switch (origblob->parent_id) {
 	case SPDK_BLOBID_EXTERNAL_SNAPSHOT:
+		blob_move_esnap_ref(origblob, newblob);
 		bserrno = bs_snapshot_copy_xattr(newblob, origblob, BLOB_EXTERNAL_SNAPSHOT_ID);
 		if (bserrno != 0) {
 			bs_clone_snapshot_newblob_cleanup(ctx, bserrno);
@@ -6965,6 +7061,42 @@ bs_inflate_blob_set_parent_cpl(void *cb_arg, struct spdk_blob *_parent, int bser
 }
 
 static void
+bs_inflate_blob_set_esnap_refs(struct spdk_clone_snapshot_ctx *ctx)
+{
+	struct spdk_blob *_blob = ctx->original.blob;
+	struct spdk_blob *_parent = ((struct spdk_blob_bs_dev *)(_blob->back_bs_dev))->blob;
+	int bserrno;
+
+	assert(_parent != NULL);
+	assert(_parent->parent_id == SPDK_BLOBID_EXTERNAL_SNAPSHOT);
+
+	/* Temporarily override md_ro flag for MD modification */
+	_blob->md_ro = false;
+
+	blob_remove_xattr(_blob, BLOB_SNAPSHOT, true);
+	bserrno = bs_snapshot_copy_xattr(_blob, _parent, BLOB_EXTERNAL_SNAPSHOT_ID);
+	if (bserrno != 0) {
+		bs_clone_snapshot_origblob_cleanup(ctx, bserrno);
+		return;
+	}
+
+	bs_blob_list_remove(_blob);
+	blob_back_bs_destroy(_blob);
+
+	_blob->invalid_flags |= SPDK_BLOB_EXTERNAL_SNAPSHOT;
+	_blob->parent_id = SPDK_BLOBID_EXTERNAL_SNAPSHOT;
+	_blob->back_bs_dev = _parent->back_bs_dev;
+
+	bserrno = blob_add_esnap_ref(_blob);
+	if (bserrno != 0) {
+		bs_clone_snapshot_origblob_cleanup(ctx, bserrno);
+		return;
+	}
+
+	spdk_blob_sync_md(_blob, bs_clone_snapshot_origblob_cleanup, ctx);
+}
+
+static void
 bs_inflate_blob_done(struct spdk_clone_snapshot_ctx *ctx)
 {
 	struct spdk_blob *_blob = ctx->original.blob;
@@ -6987,17 +7119,22 @@ bs_inflate_blob_done(struct spdk_clone_snapshot_ctx *ctx)
 		assert(!blob_is_esnap_clone(_blob));
 
 		_parent = ((struct spdk_blob_bs_dev *)(_blob->back_bs_dev))->blob;
-		if (_parent->parent_id != SPDK_BLOBID_INVALID) {
+		switch (_parent->parent_id) {
+		case SPDK_BLOBID_INVALID:
+			bs_blob_list_remove(_blob);
+			_blob->parent_id = SPDK_BLOBID_INVALID;
+			blob_back_bs_destroy(_blob);
+			_blob->back_bs_dev = bs_create_zeroes_dev();
+			break;
+		case SPDK_BLOBID_EXTERNAL_SNAPSHOT:
+			bs_inflate_blob_set_esnap_refs(ctx);
+			return;
+		default:
 			/* We must change the parent of the inflated blob */
 			spdk_bs_open_blob(_blob->bs, _parent->parent_id,
 					  bs_inflate_blob_set_parent_cpl, ctx);
 			return;
 		}
-
-		bs_blob_list_remove(_blob);
-		_blob->parent_id = SPDK_BLOBID_INVALID;
-		blob_back_bs_destroy(_blob);
-		_blob->back_bs_dev = bs_create_zeroes_dev();
 	}
 
 	/* Temporarily override md_ro flag for MD modification */
@@ -7719,6 +7856,11 @@ bs_set_external_parent_refs(struct spdk_blob *blob, struct blob_parent *parent)
 	}
 	blob->invalid_flags |= SPDK_BLOB_EXTERNAL_SNAPSHOT;
 	blob->parent_id = SPDK_BLOBID_EXTERNAL_SNAPSHOT;
+	rc = blob_add_esnap_ref(blob);
+	if (rc != 0) {
+		SPDK_ERRLOG("error %d adding esnap ref\n", rc);
+		return rc;
+	}
 
 	bs_blob_list_add(blob);
 
@@ -8161,6 +8303,7 @@ delete_snapshot_update_extent_pages_cpl(struct delete_snapshot_ctx *ctx)
 		}
 		ctx->clone->parent_id = SPDK_BLOBID_EXTERNAL_SNAPSHOT;
 		ctx->clone->back_bs_dev = ctx->snapshot->back_bs_dev;
+		blob_move_esnap_ref(ctx->snapshot, ctx->clone);
 		/* Do not delete the external snapshot along with this snapshot */
 		ctx->snapshot->back_bs_dev = NULL;
 		ctx->clone->invalid_flags |= SPDK_BLOB_EXTERNAL_SNAPSHOT;
@@ -10218,8 +10361,7 @@ blob_frozen_set_back_bs_dev(void *_ctx, struct spdk_blob *blob, int bserrno)
 	}
 
 	if (blob->back_bs_dev != NULL) {
-		blob->back_bs_dev->destroy(blob->back_bs_dev);
-		blob->back_bs_dev = NULL;
+		blob_back_bs_dev_unref(blob);
 	}
 
 	if (ctx->parent_refs_cb_fn) {
@@ -10234,6 +10376,10 @@ blob_frozen_set_back_bs_dev(void *_ctx, struct spdk_blob *blob, int bserrno)
 	SPDK_NOTICELOG("blob 0x%" PRIx64 ": hotplugged back_bs_dev\n", blob->id);
 	blob->back_bs_dev = ctx->back_bs_dev;
 	ctx->bserrno = 0;
+
+	if (blob->parent_id == SPDK_BLOBID_EXTERNAL_SNAPSHOT) {
+		ctx->bserrno = blob_add_esnap_ref(blob);
+	}
 
 	blob_unfreeze_io(blob, blob_set_back_bs_dev_done, ctx);
 }
